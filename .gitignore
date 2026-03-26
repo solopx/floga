@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache
+
+# Ambientes
+venv/
+.env
+
+# Old versions
+old_versions/
+
+# Interface e Sistema
+.vscode/
+.DS_Store
+
+# PyInstaller
+dist/
+build/
