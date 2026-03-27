@@ -16,6 +16,7 @@ It provides a user-friendly interface for security professionals to manage UTM l
 - **Visual Analysis:** Automatic color-coding for critical levels (alert, critical, error) and block actions (deny, block).
 - **Live Statistics:** Side panel showing real-time stats (Top Source IPs, Top Actions, and Severity Levels).
 - **High Performance:** Dynamic paging system for smooth handling of large files.
+- **Record Grouping:** Group logs by any column to view totals by IP, action, status, etc., with drill-down to filter the group's records.
 - **Data Export:** Export filtered results to `.csv` or `.json` formats.
 - **Detailed Inspection:** Double-click any entry to view all log metadata in a dedicated window.
 
@@ -64,8 +65,9 @@ It provides a user-friendly interface for security professionals to manage UTM l
 5. **Export as Text**: Right-click on any row to export the selected line as plain text.
 6. **Export Data**: Click **"Exportar CSV"** or **"Exportar JSON"** to save your filtered results into those formats.
 7. **Detailed View**: Double-click any log entry to open a pop-up window with its full metadata.
-8. **Chart Plotting:** Graphs with export capability for better visualization and presentation of the data found.
-9. **Statistics**: Use the right-side panel to visualize the most common traffic patterns (Top IPs, Actions, etc.).
+8. **Group By:** Click "Agrupar por" and select a column to see record totals per value. Click a row to filter down to that group's records. Use "Limpar" to clear the group filter or "Voltar" to return to the full log view.
+9. **Chart Plotting:** Graphs with export capability for better visualization and presentation of the data found.
+10. **Statistics**: Use the right-side panel to visualize the most common traffic patterns (Top IPs, Actions, etc.).
 
 ## Expected Log Format
 The analyzer parses standard key=value log entries, such as:

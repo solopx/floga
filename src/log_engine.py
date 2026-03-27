@@ -47,12 +47,13 @@ class LogEngine:
             parsed[key] = value
         return parsed
 
-    def load_file(self, filepath: str) -> Tuple[int, int]:
+    def load_file(self, filepath: str, progress_cb=None) -> Tuple[int, int]:
         self.all_logs.clear()
         all_keys = set()
         size = os.path.getsize(filepath)
         total_lines = 0
         valid_lines = 0
+        _CHUNK = 50_000
 
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
@@ -63,8 +64,11 @@ class LogEngine:
                 data = self.parse_line(line)
                 if data:
                     valid_lines += 1
-                self.all_logs.append(data)
                 all_keys.update(data.keys())
+                data['_dt'] = self.parse_log_datetime(data)
+                self.all_logs.append(data)
+                if progress_cb and total_lines % _CHUNK == 0:
+                    progress_cb(f.buffer.tell() / size)
 
         if total_lines > 0 and valid_lines == 0:
             raise ValueError(
@@ -132,7 +136,7 @@ class LogEngine:
 
     def _eval_condition(self, cond: FieldCondition, log: dict) -> bool:
         if cond.field is None:
-            return any(cond.value in str(v).lower() for v in log.values())
+            return any(cond.value in str(v).lower() for k, v in log.items() if k != '_dt')
         raw = log.get(cond.field)
         if raw is None:
             return False
@@ -150,7 +154,7 @@ class LogEngine:
 
         for log in self.all_logs:
             if criteria.date_start or criteria.date_end:
-                log_dt = self.parse_log_datetime(log)
+                log_dt = log['_dt'] if '_dt' in log else self.parse_log_datetime(log)
                 if log_dt is None:
                     continue
                 if criteria.date_start and log_dt < criteria.date_start:
@@ -196,12 +200,13 @@ class LogEngine:
 
     def export_json(self, filepath: str):
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(self.filtered_logs, f, indent=2)
+            data = [{k: v for k, v in log.items() if k != '_dt'} for log in self.filtered_logs]
+            json.dump(data, f, indent=2)
 
     def get_timeline_data(self) -> Dict[str, int]:
         timeline = Counter()
         for log in self.filtered_logs:
-            log_dt = self.parse_log_datetime(log)
+            log_dt = log['_dt'] if '_dt' in log else self.parse_log_datetime(log)
             if log_dt:
                 timeline[log_dt.strftime(self._HOUR_FMT)] += 1
         return dict(sorted(timeline.items()))
@@ -213,7 +218,7 @@ class LogEngine:
     def get_30min_distribution(self) -> Dict[str, int]:
         intervals = Counter()
         for log in self.filtered_logs:
-            log_dt = self.parse_log_datetime(log)
+            log_dt = log['_dt'] if '_dt' in log else self.parse_log_datetime(log)
             if log_dt:
                 minute_interval = '00-30' if log_dt.minute < 30 else '30-00'
                 key = f'{log_dt.hour:02d}:{minute_interval}'
@@ -223,12 +228,18 @@ class LogEngine:
     def get_level_counts(self) -> Counter:
         return Counter(log.get('level', 'unknown') for log in self.filtered_logs)
 
+    def group_by(self, field: str) -> List[Tuple[str, int]]:
+        counter = Counter(
+            log.get(field, '') for log in self.filtered_logs if log.get(field)
+        )
+        return counter.most_common()
+
     def get_error_time_series(self) -> Dict[str, int]:
         counter = Counter()
         for log in self.filtered_logs:
             level = log.get('level', '').lower()
             if level in ('error', 'critical', 'alert'):
-                dt = self.parse_log_datetime(log)
+                dt = log['_dt'] if '_dt' in log else self.parse_log_datetime(log)
                 if dt:
                     counter[dt.strftime(self._HOUR_FMT)] += 1
         return dict(sorted(counter.items()))

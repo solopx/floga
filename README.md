@@ -19,6 +19,7 @@ Este aplicativo torna mais fácil a análise e a gerência de logs de dispositiv
 - **Busca dinâmica:** Filtra logs por qualquer termo em todos os campos, com busca case-insensitive.
 - **Busca temporal:** Busca por intervalo de tempo (data/hora)
 - **Análise Visual Simples:** Coloração automática para níveis e para ações comuns de tráfego.
+- **Agrupamento de Registros:** Agrupe logs por qualquer coluna para visualizar totais por IP, ação, status, etc., com drill-down para filtrar pelos registros do grupo.
 - **Plotagem de gráficos:** Gráficos com capacidade de exportação para melhor visualização e apresentação dos dados coletados.
 - **Inspeção Detalhada:** Clique duplo em qualquer linha para abrir uma janela de detalhes com todos os campos do log selecionado.
 - **Exportação de Dados**: Possibilidade de exportação dos dados selecionados em formatos .csv ou .json
@@ -30,10 +31,10 @@ Este aplicativo torna mais fácil a análise e a gerência de logs de dispositiv
 
 ## Como Usar:
 
-### Pré-requisitos
+### Pré-requisitos:
 Python 3.x
 
-### Execução
+### Execução:
 
 1.  **Baixe o Repositório**
     ```bash
@@ -60,7 +61,8 @@ Python 3.x
 4. Clique com o botão direito sobre as linhas para exportar as linhas como texto.
 5. Clique em "Exportar CSV" ou Exportar JSON" para exportar os resultados da busca para os formatos .csv ou .json.
 6. Duplo clique sobre a linha do log abre uma janela com os dados completos da entrada de log.
-7. Gráficos: Clique no menu gráficos para gerar e exportar gráficos gerados a partir dos logs.
+7. Agrupar por: Clique em "Agrupar por" e selecione uma coluna para ver o total de registros por valor. Clique em uma linha do agrupamento para filtrar pelos registros daquele grupo. Clique em "Limpar" para desfazer o filtro do grupo ou "Voltar" para retornar à visualização completa.
+8. Gráficos: Clique no menu Gráficos para gerar e exportar gráficos a partir dos logs filtrados.
 
 ## Estrutura dos Logs Esperada
 
@@ -70,11 +72,12 @@ O script analisa entrada de logs no formato `key=value`, como por exemplo:
 
 ## Estrutura da aplicação
 
-A aplicação foi dividida em 3 arquivos para melhor manutenção e expansão:
+A aplicação foi dividida em 4 arquivos para melhor manutenção e expansão:
 
 1. **log_engine.py:** Motor de parse de logs, busca e filtros
 2. **ui.py:** Interface gráfica em Tkinter.
-3. **main.py:** Start da aplicação.
+3. **charts.py:** Geração e exibição de gráficos.
+4. **main.py:** Start da aplicação.
 
 
 ## Contribuições

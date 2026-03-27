@@ -7,20 +7,10 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkcalendar import DateEntry
 
-try:
-    import matplotlib
-    matplotlib.use('TkAgg')
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    plt.ioff()
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
-    logging.warning("Matplotlib não instalado. Gráficos desabilitados.")
-
 from typing import Dict, List
 
 from log_engine import LogEngine, FilterCriteria
+from charts import ChartsMixin, MATPLOTLIB_AVAILABLE
 
 
 class UIStyle:
@@ -176,15 +166,14 @@ class SidebarView:
         nav = tk.Frame(self.frame, bg=UIStyle.BG_TOOLBAR, pady=10)
         nav.pack(fill=tk.X)
 
-        self.btn_load   = self._nav_btn(nav, 'Abrir Arquivo')
-        self.btn_charts = self._nav_btn(nav, 'Gráficos')
-        self.btn_csv    = self._nav_btn(nav, 'Exportar CSV')
-        self.btn_json   = self._nav_btn(nav, 'Exportar JSON')
+        self.btn_load    = self._nav_btn(nav, 'Abrir Arquivo')
+        self.btn_groupby = self._nav_btn(nav, 'Agrupar Registros')
+        self.btn_charts  = self._nav_btn(nav, 'Gráficos')
+        self.btn_csv     = self._nav_btn(nav, 'Exportar CSV')
+        self.btn_json    = self._nav_btn(nav, 'Exportar JSON')
 
-        tk.Frame(nav, bg=UIStyle.BG_TBTN_ACTIVE, height=1).pack(
-            fill=tk.X, padx=14, pady=(6, 0)
-        )
         self.btn_help = self._nav_btn(nav, 'Ajuda')
+        self.btn_exit = self._nav_btn(nav, 'Sair')
 
         self.charts_menu = tk.Menu(
             self.frame, tearoff=0,
@@ -253,9 +242,8 @@ class FilterView:
         ).grid(row=0, column=4, sticky='w', padx=(12, 0), pady=(0, 4))
 
         self.search_var = tk.StringVar()
-        UIStyle.create_entry(grid, self.search_var, width=50).grid(
-            row=1, column=0, sticky='ew', ipady=4
-        )
+        self.search_entry = UIStyle.create_entry(grid, self.search_var, width=50)
+        self.search_entry.grid(row=1, column=0, sticky='ew', ipady=4)
 
         self._vsep(grid, column=1)
         self._vsep(grid, column=3)
@@ -522,26 +510,44 @@ class MetricsView:
 
 class NavigationView:
     def __init__(self, parent):
-        self.frame = tk.Frame(
-            parent, bg=UIStyle.BG_NAV,
-            highlightbackground=UIStyle.BORDER_COLOR,
-            highlightthickness=1,
-        )
+        self.frame = tk.Frame(parent, bg=UIStyle.BG_NAV)
 
-        self.btn_prev = UIStyle.create_button(self.frame, '◀ Anterior', None)
-        self.btn_prev.pack(side=tk.LEFT, padx=(8, 2), pady=5)
+        self.btn_first = UIStyle.create_button(self.frame, '|◀', None)
+        self.btn_first.pack(side=tk.LEFT, padx=(8, 2), pady=5)
 
-        self.btn_next = UIStyle.create_button(self.frame, 'Proxima ▶', None)
-        self.btn_next.pack(side=tk.LEFT, padx=2, pady=5)
+        self.btn_prev = UIStyle.create_button(self.frame, '◀', None)
+        self.btn_prev.pack(side=tk.LEFT, padx=2, pady=5)
 
-        self.label = tk.Label(
+        self.page_var = tk.StringVar(value='1')
+        self.page_entry = tk.Entry(
             self.frame,
-            text='Pagina 1 / 1',
+            textvariable=self.page_var,
+            width=4,
+            justify='center',
+            font=UIStyle.FONT_BOLD,
+            bg=UIStyle.BG_CARD,
+            fg=UIStyle.FG_MAIN,
+            relief=tk.FLAT,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=UIStyle.BORDER_COLOR,
+        )
+        self.page_entry.pack(side=tk.LEFT, padx=(8, 2), pady=5, ipady=3)
+
+        self.total_label = tk.Label(
+            self.frame,
+            text='/ 1',
             bg=UIStyle.BG_NAV,
             fg=UIStyle.FG_STATUS,
             font=UIStyle.FONT_BOLD,
         )
-        self.label.pack(side=tk.LEFT, padx=14)
+        self.total_label.pack(side=tk.LEFT, padx=(2, 8))
+
+        self.btn_next = UIStyle.create_button(self.frame, '▶', None)
+        self.btn_next.pack(side=tk.LEFT, padx=2, pady=5)
+
+        self.btn_last = UIStyle.create_button(self.frame, '▶|', None)
+        self.btn_last.pack(side=tk.LEFT, padx=(2, 8), pady=5)
 
 
 class StatusView:
@@ -558,8 +564,84 @@ class StatusView:
         )
 
 
-class FLogAApp:
-    PAGE_SIZE   = 3000
+class GroupByView:
+    def __init__(self, parent):
+        self.frame = UIStyle.create_frame(parent)
+
+        bar = tk.Frame(self.frame, bg=UIStyle.BG_TOOLBAR, padx=10, pady=6)
+        bar.pack(fill=tk.X)
+        tk.Label(
+            bar, text='Agrupar por campo:',
+            bg=UIStyle.BG_TOOLBAR, fg=UIStyle.FG_ON_DARK,
+            font=UIStyle.FONT_BOLD,
+        ).pack(side=tk.LEFT)
+        self.field_var = tk.StringVar()
+        self.field_combo = ttk.Combobox(
+            bar, textvariable=self.field_var,
+            state='readonly', width=20,
+            font=UIStyle.FONT_NORMAL,
+        )
+        self.field_combo.pack(side=tk.LEFT, padx=(8, 0))
+        tk.Label(
+            bar,
+            text='Duplo clique para filtrar pelos logs do item selecionado',
+            bg=UIStyle.BG_TOOLBAR, fg='#6B8CAE',
+            font=UIStyle.FONT_SMALL,
+        ).pack(side=tk.LEFT, padx=(16, 0))
+        self.btn_close = tk.Button(
+            bar, text='← Voltar',
+            bg=UIStyle.BG_TBTN_ACTIVE, fg=UIStyle.FG_ON_DARK,
+            font=UIStyle.FONT_NORMAL,
+            relief=tk.FLAT, cursor='hand2',
+            activebackground=UIStyle.BG_TOOLBAR,
+            activeforeground=UIStyle.FG_ON_DARK,
+            padx=10, pady=4, bd=0,
+        )
+        self.btn_close.pack(side=tk.RIGHT, padx=(8, 0))
+        self.btn_clear = tk.Button(
+            bar, text='Limpar',
+            bg=UIStyle.BG_TBTN_ACTIVE, fg=UIStyle.FG_ON_DARK,
+            font=UIStyle.FONT_NORMAL,
+            relief=tk.FLAT, cursor='hand2',
+            activebackground=UIStyle.BG_TOOLBAR,
+            activeforeground=UIStyle.FG_ON_DARK,
+            padx=10, pady=4, bd=0,
+        )
+        self.btn_clear.pack(side=tk.RIGHT, padx=(0, 4))
+
+        container = tk.Frame(self.frame, bg=UIStyle.BG_MAIN)
+        container.pack(fill=tk.BOTH, expand=True)
+        container.rowconfigure(0, weight=1)
+        container.columnconfigure(0, weight=1)
+
+        self.tree = ttk.Treeview(
+            container, columns=('value', 'count'),
+            show='headings', selectmode='browse',
+        )
+        self.tree.tag_configure('evenrow', background='#FFFFFF')
+        self.tree.tag_configure('oddrow',  background='#F7FAFC')
+
+        vsb = ttk.Scrollbar(container, orient='vertical',   command=self.tree.yview)
+        hsb = ttk.Scrollbar(container, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+
+    def populate(self, field: str, rows: list):
+        self.tree.delete(*self.tree.get_children())
+        self.tree.heading('value', text=field.upper())
+        self.tree.heading('count', text='TOTAL')
+        self.tree.column('value', width=400, anchor='w', stretch=True)
+        self.tree.column('count', width=100, anchor='e', stretch=False)
+        for i, (val, count) in enumerate(rows):
+            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+            self.tree.insert('', tk.END, values=(val, f'{count:,}'), tags=(tag,))
+
+
+class FLogAApp(ChartsMixin):
+    PAGE_SIZE   = 500
     DEBOUNCE_MS = 300
     APPNAME     = "FLogA - Fortinet Log Analyzer"
     APPVERSION  = "V2"
@@ -578,10 +660,13 @@ class FLogAApp:
         self._debounce_id = None
         self._chart_windows = []
         self._base_status = 'Pronto'
+        self._filter_running = False
+        self._pending_criteria = None
+        self._groupby_mode = False
 
         self._build_ui()
         self._connect_events()
-        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+        self.root.protocol("WM_DELETE_WINDOW", self._confirm_exit)
 
     def _build_ui(self):
         self.sidebar = SidebarView(self.root)
@@ -602,12 +687,15 @@ class FLogAApp:
         self.table = TableView(main)
         self.table.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        self.groupby_view = GroupByView(main)
+
         self.navigation = NavigationView(content)
         self.navigation.frame.pack(fill=tk.X, padx=10, pady=(4, 4))
 
         self.status = StatusView(content)
         self.status.label.pack(side=tk.BOTTOM, fill=tk.X)
 
+        self._ctx_cell_value = None
         self.context_menu = tk.Menu(
             self.root, tearoff=0,
             bg=UIStyle.BG_CARD, fg=UIStyle.FG_MAIN,
@@ -615,6 +703,11 @@ class FLogAApp:
             activeforeground=UIStyle.FG_BUTTON,
             font=UIStyle.FONT_NORMAL,
         )
+        self.context_menu.add_command(
+            label='Copiar Valor da Célula',
+            command=self._copy_cell_value,
+        )
+        self.context_menu.add_separator()
         self.context_menu.add_command(
             label='Copiar Linhas Selecionadas',
             command=self._copy_selection,
@@ -625,6 +718,14 @@ class FLogAApp:
         self.sidebar.btn_csv.config(command=lambda: self._export('csv'))
         self.sidebar.btn_json.config(command=lambda: self._export('json'))
         self.sidebar.btn_help.config(command=self._show_help)
+        self.sidebar.btn_exit.config(command=self._confirm_exit)
+        self.sidebar.btn_groupby.config(command=self._toggle_groupby)
+        self.groupby_view.btn_close.config(command=self._close_groupby)
+        self.groupby_view.btn_clear.config(command=self._clear_groupby_filter)
+
+        self.groupby_view.field_combo.bind('<<ComboboxSelected>>', self._on_groupby_field_change)
+        self.groupby_view.tree.bind('<Double-1>', self._on_groupby_drilldown)
+
 
         self.sidebar.btn_charts.config(command=self._show_charts_menu)
         self.sidebar.charts_menu.add_command(
@@ -673,8 +774,11 @@ class FLogAApp:
         self.table.tree.bind('<Double-1>', self._show_details)
         self.table.tree.bind('<Button-3>', self._show_context_menu)
 
+        self.navigation.btn_first.config(command=self._first_page)
         self.navigation.btn_prev.config(command=self._prev_page)
         self.navigation.btn_next.config(command=self._next_page)
+        self.navigation.btn_last.config(command=self._last_page)
+        self.navigation.page_entry.bind('<Return>', self._go_to_page)
 
     def _load_file(self):
         path = filedialog.askopenfilename(filetypes=[('Logs', '*.log;*.txt')])
@@ -682,13 +786,16 @@ class FLogAApp:
             return
 
         self.sidebar.btn_load.config(state=tk.DISABLED)
-        self.sidebar.progress.config(mode='indeterminate')
-        self.sidebar.progress.start(10)
+        self.sidebar.progress.config(mode='determinate')
+        self.sidebar.progress['value'] = 0
         self.status.var.set('Carregando arquivo...')
+
+        def _on_progress(ratio):
+            self.root.after(0, lambda r=ratio: self.sidebar.progress.config(value=r * 100))
 
         def _worker():
             try:
-                total, size = self.engine.load_file(path)
+                total, size = self.engine.load_file(path, progress_cb=_on_progress)
                 self.root.after(0, lambda: self._on_load_complete(path, total, size))
             except Exception as e:
                 self.root.after(0, lambda: self._on_load_error(e))
@@ -696,8 +803,7 @@ class FLogAApp:
         threading.Thread(target=_worker, daemon=True).start()
 
     def _on_load_complete(self, path: str, total: int, size: int):
-        self.sidebar.progress.stop()
-        self.sidebar.progress.config(mode='determinate')
+        self.sidebar.progress['value'] = 100
         self.sidebar.btn_load.config(state=tk.NORMAL)
 
         self.table.tree.delete(*self.table.tree.get_children())
@@ -716,11 +822,13 @@ class FLogAApp:
             f'{os.path.basename(path)}  |  {total:,} linhas  |  '
             f'{size / 1024 / 1024:.2f} MB'
         )
+        self.groupby_view.field_combo['values'] = self.engine.columns
+        if self.engine.columns:
+            self.groupby_view.field_var.set(self.engine.columns[0])
         self._apply_filters()
 
     def _on_load_error(self, e: Exception):
-        self.sidebar.progress.stop()
-        self.sidebar.progress.config(mode='determinate')
+        self.sidebar.progress['value'] = 0
         self.sidebar.btn_load.config(state=tk.NORMAL)
         logging.exception(e)
         messagebox.showerror('Erro', str(e))
@@ -786,10 +894,44 @@ class FLogAApp:
             date_end=date_end,
         )
 
-        self.engine.apply_filter(criteria)
-        self.current_page = 0
-        self._refresh_table()
-        self._update_stats()
+        if self._filter_running:
+            self._pending_criteria = criteria
+            return
+
+        self._run_filter(criteria)
+
+    def _run_filter(self, criteria: FilterCriteria):
+        self._filter_running = True
+        self._pending_criteria = None
+        self._set_controls_state(tk.DISABLED)
+        self.status.var.set('Filtrando...')
+
+        def _worker():
+            self.engine.apply_filter(criteria)
+            self.root.after(0, _done)
+
+        def _done():
+            self._filter_running = False
+            self.current_page = 0
+            self._refresh_table()
+            self._update_stats()
+            if self._groupby_mode:
+                self._refresh_groupby()
+            self._set_controls_state(tk.NORMAL)
+            if self._pending_criteria is not None:
+                self._run_filter(self._pending_criteria)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _set_controls_state(self, state):
+        self.filters.search_entry.config(state=state)
+        self.filters.btn_clear.config(state=state)
+        self.sidebar.btn_load.config(state=state)
+        self.navigation.btn_first.config(state=state)
+        self.navigation.btn_prev.config(state=state)
+        self.navigation.btn_next.config(state=state)
+        self.navigation.btn_last.config(state=state)
+        self.navigation.page_entry.config(state=state)
 
     def _clear_filters(self):
         today = datetime.now().date()
@@ -816,41 +958,33 @@ class FLogAApp:
 
         self._refresh_table()
 
+    _LEVEL_TAG = {
+        'alert': 'critical', 'critical': 'critical', 'error': 'critical',
+        'emerg': 'critical', 'emergency': 'critical', 'crit': 'critical',
+        'high': 'critical',
+        'warning': 'warning', 'medium': 'warning',
+        'notice': 'notice',
+        'low': 'info', 'information': 'info', 'info': 'info', 'debug': 'info',
+    }
+    _ACTION_TAG = {
+        'deny': 'critical', 'block': 'critical',
+        'accept': 'success', 'allow': 'success', 'pass': 'success', 'permitted': 'success',
+    }
+
     def _refresh_table(self):
         tree = self.table.tree
         tree.config(yscrollcommand='', xscrollcommand='')
         tree.delete(*tree.get_children())
 
         page_logs = self.engine.get_page(self.current_page, self.PAGE_SIZE)
+        cols = self.engine.columns
 
         for index, log in enumerate(page_logs):
-            vals = [
-                log.get(c, '').upper() if c == 'level' else log.get(c, '')
-                for c in self.engine.columns
-            ]
-            level  = log.get('level',  '').lower()
-            action = log.get('action', '').lower()
-
+            vals = [log.get(c, '').upper() if c == 'level' else log.get(c, '') for c in cols]
             base_tag = 'evenrow' if index % 2 == 0 else 'oddrow'
-
-            if level in ('alert', 'critical', 'error', 'emerg', 'emergency', 'crit') \
-                    or action in ('deny', 'block'):
-                tag = ('critical', base_tag)
-            elif level in ('warning', 'medium'):
-                tag = ('warning', base_tag)
-            elif level == 'notice':
-                tag = ('notice', base_tag)
-            elif level == 'high':
-                tag = ('critical', base_tag)
-            elif level == 'low':
-                tag = ('info', base_tag)
-            elif action in ('accept', 'allow', 'pass', 'permitted'):
-                tag = ('success', base_tag)
-            elif level in ('information', 'info', 'debug'):
-                tag = ('info', base_tag)
-            else:
-                tag = base_tag
-
+            color = (self._LEVEL_TAG.get(log.get('level', '').lower())
+                     or self._ACTION_TAG.get(log.get('action', '').lower()))
+            tag = (color, base_tag) if color else base_tag
             tree.insert('', tk.END, values=vals, tags=tag)
 
         tree.config(
@@ -860,9 +994,8 @@ class FLogAApp:
 
         total       = len(self.engine.filtered_logs)
         total_pages = max(1, (total - 1) // self.PAGE_SIZE + 1)
-        self.navigation.label.config(
-            text=f'Pagina {self.current_page + 1} / {total_pages}'
-        )
+        self.navigation.page_var.set(str(self.current_page + 1))
+        self.navigation.total_label.config(text=f'/ {total_pages}')
 
         query = self.filters.search_var.get().strip()
         datetime_active = self.filters.datetime_enabled.get()
@@ -875,6 +1008,47 @@ class FLogAApp:
 
     def _update_stats(self):
         self.metrics.update(self.engine.filtered_logs)
+
+    def _toggle_groupby(self):
+        if self._groupby_mode:
+            self._close_groupby()
+            return
+        if not self.engine.filtered_logs:
+            return
+        self._groupby_mode = True
+        self.sidebar.btn_groupby.config(bg=UIStyle.ACCENT, fg=UIStyle.FG_BUTTON)
+        self.table.frame.pack_forget()
+        self.groupby_view.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._refresh_groupby()
+
+    def _close_groupby(self):
+        self._groupby_mode = False
+        self.sidebar.btn_groupby.config(bg=UIStyle.BG_TOOLBAR, fg=UIStyle.FG_ON_DARK)
+        self.groupby_view.frame.pack_forget()
+        self.table.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    def _refresh_groupby(self):
+        field = self.groupby_view.field_var.get()
+        if not field:
+            return
+        rows = self.engine.group_by(field)
+        self.groupby_view.populate(field, rows)
+
+    def _clear_groupby_filter(self):
+        self.filters.search_var.set('')
+
+    def _on_groupby_field_change(self, *_):
+        if self._groupby_mode:
+            self._refresh_groupby()
+
+    def _on_groupby_drilldown(self, event):
+        sel = self.groupby_view.tree.focus()
+        if not sel:
+            return
+        field = self.groupby_view.field_var.get()
+        value = self.groupby_view.tree.item(sel, 'values')[0]
+        self.filters.search_var.set(f'{field}=={value}')
+        self._close_groupby()
 
     def _show_help(self):
         win = tk.Toplevel(self.root)
@@ -1003,22 +1177,29 @@ class FLogAApp:
             self.current_page += 1
             self._refresh_table()
 
-    def _show_charts_menu(self):
-        if not MATPLOTLIB_AVAILABLE:
-            messagebox.showwarning(
-                "Matplotlib nao disponivel",
-                "Instale matplotlib para usar graficos:\npip install matplotlib",
-            )
-            return
+    def _first_page(self):
+        if self.current_page != 0:
+            self.current_page = 0
+            self._refresh_table()
 
-        if not self.engine.filtered_logs:
-            messagebox.showwarning("Aviso", "Nenhum log para gerar grafico.")
-            return
+    def _last_page(self):
+        max_page = max(0, (len(self.engine.filtered_logs) - 1) // self.PAGE_SIZE)
+        if self.current_page != max_page:
+            self.current_page = max_page
+            self._refresh_table()
 
-        self.sidebar.charts_menu.post(
-            self.sidebar.btn_charts.winfo_rootx() + self.sidebar.btn_charts.winfo_width(),
-            self.sidebar.btn_charts.winfo_rooty(),
-        )
+    def _go_to_page(self, _event=None):
+        max_page = max(0, (len(self.engine.filtered_logs) - 1) // self.PAGE_SIZE)
+        try:
+            page = int(self.navigation.page_var.get())
+        except ValueError:
+            self.navigation.page_var.set(str(self.current_page + 1))
+            return
+        if not (1 <= page <= max_page + 1):
+            self.navigation.page_var.set(str(self.current_page + 1))
+            return
+        self.current_page = page - 1
+        self._refresh_table()
 
     def _make_chart_window(self, title: str, geometry: str) -> tk.Toplevel:
         win = tk.Toplevel(self.root)
@@ -1046,181 +1227,6 @@ class FLogAApp:
         UIStyle.create_button(btn_frame, 'Exportar Imagem', export_image).pack(
             side=tk.LEFT, padx=8, pady=4
         )
-
-    def _on_chart_close(self, win: tk.Toplevel, fig) -> None:
-        plt.close(fig)
-        if win in self._chart_windows:
-            self._chart_windows.remove(win)
-        win.destroy()
-
-    def _embed_canvas(self, fig, win: tk.Toplevel, btn_frame: tk.Frame) -> None:
-        canvas = FigureCanvasTkAgg(fig, master=win)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self._add_export_button(btn_frame, fig)
-        win.protocol("WM_DELETE_WINDOW", lambda: self._on_chart_close(win, fig))
-
-    def _show_volume_chart(self):
-        timeline_data = self.engine.get_timeline_data()
-        if not timeline_data:
-            messagebox.showinfo('Info', 'Dados insuficientes para volume.')
-            return
-
-        win       = self._make_chart_window('Volume de Logs', '1000x650')
-        btn_frame = self._chart_btn_frame(win)
-
-        fig, ax = plt.subplots(figsize=(11, 6))
-        hours  = list(timeline_data.keys())
-        counts = list(timeline_data.values())
-
-        ax.plot(range(len(hours)), counts, marker='o', linewidth=2,
-                markersize=5, color='#2B6CB0', markerfacecolor='#63B3ED')
-        ax.fill_between(range(len(hours)), counts, alpha=0.15, color='#2B6CB0')
-        ax.set_xlabel('Data/Hora', fontsize=11, fontweight='bold')
-        ax.set_ylabel('Quantidade de Logs', fontsize=11, fontweight='bold')
-        ax.set_title('Volume de Logs ao Longo do Tempo', fontsize=13, fontweight='bold')
-        ax.grid(True, alpha=0.3, linestyle='--')
-
-        step = max(1, len(hours) // 10)
-        ax.set_xticks(range(0, len(hours), step))
-        ax.set_xticklabels([hours[i] for i in range(0, len(hours), step)],
-                           rotation=45, ha='right', fontsize=9)
-        plt.tight_layout()
-
-        self._embed_canvas(fig, win, btn_frame)
-
-    def _show_top_chart(self, field: str, title: str, limit: int = 5):
-        top_data = self.engine.get_top_data(field, limit=limit)
-        if not top_data:
-            messagebox.showinfo('Info', f'Nenhum dado disponivel para {field}.')
-            return
-
-        win       = self._make_chart_window(title, '900x650')
-        btn_frame = self._chart_btn_frame(win)
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        labels = [item[0] for item in top_data]
-        values = [item[1] for item in top_data]
-
-        palette = ['#2B6CB0', '#3182CE', '#4299E1', '#63B3ED', '#90CDF4']
-        bars = ax.barh(range(len(labels)), values,
-                       color=palette[:len(labels)], edgecolor='none')
-        ax.invert_yaxis()
-        ax.set_yticks(range(len(labels)))
-        ax.set_yticklabels(labels, fontsize=10)
-        ax.set_xlabel('Quantidade', fontsize=11, fontweight='bold')
-        ax.set_title(title, fontsize=13, fontweight='bold')
-        ax.grid(True, axis='x', alpha=0.3, linestyle='--')
-
-        for i, (bar, value) in enumerate(zip(bars, values)):
-            ax.text(value + max(values) * 0.01, i, f'{value:,}',
-                    va='center', fontsize=10, fontweight='bold')
-        plt.tight_layout()
-
-        self._embed_canvas(fig, win, btn_frame)
-
-    def _plot_error_trend(self):
-        data = self.engine.get_error_time_series()
-        if not data:
-            messagebox.showinfo("Info", "Sem erros/criticos no periodo.")
-            return
-
-        win       = self._make_chart_window('Erros / Critical ao Longo do Tempo', '1000x600')
-        btn_frame = self._chart_btn_frame(win)
-
-        times  = list(data.keys())
-        values = list(data.values())
-
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(range(len(times)), values, marker='o', linewidth=2,
-                markersize=5, color='#C53030', markerfacecolor='#FC8181')
-        ax.fill_between(range(len(times)), values, alpha=0.15, color='#C53030')
-        ax.set_title('Erros / Critical ao Longo do Tempo', fontsize=13, fontweight='bold')
-        ax.set_xlabel('Data/Hora', fontsize=11, fontweight='bold')
-        ax.set_ylabel('Quantidade', fontsize=11, fontweight='bold')
-        ax.grid(True, alpha=0.3, linestyle='--')
-
-        step = max(1, len(times) // 10)
-        ax.set_xticks(range(0, len(times), step))
-        ax.set_xticklabels([times[i] for i in range(0, len(times), step)],
-                           rotation=45, ha='right', fontsize=9)
-        plt.tight_layout()
-
-        self._embed_canvas(fig, win, btn_frame)
-
-    def _plot_level_distribution(self):
-        data = self.engine.get_level_counts()
-        if not data:
-            messagebox.showinfo("Info", "Sem dados para exibir.")
-            return
-
-        filtered = [(k, v) for k, v in data.items() if k and v > 0]
-        if not filtered:
-            messagebox.showinfo("Info", "Sem niveis validos.")
-            return
-
-        labels = [k for k, v in filtered]
-        values = [v for k, v in filtered]
-
-        win       = self._make_chart_window('Distribuicao de Niveis', '700x600')
-        btn_frame = self._chart_btn_frame(win)
-
-        palette = ['#2B6CB0', '#C53030', '#975A16', '#276749', '#6B46C1', '#B83280']
-        fig, ax = plt.subplots(figsize=(7, 5))
-        ax.set_title('Distribuicao de Niveis', fontsize=13, fontweight='bold')
-
-        if len(labels) <= 6:
-            ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=90,
-                   colors=palette[:len(labels)])
-        else:
-            ax.barh(labels, values, color=palette[:min(len(labels), 6)], edgecolor='none')
-            ax.set_xlabel('Quantidade', fontsize=11, fontweight='bold')
-            ax.grid(True, axis='x', alpha=0.3, linestyle='--')
-
-        plt.tight_layout()
-
-        self._embed_canvas(fig, win, btn_frame)
-
-    def _show_heatmap_chart(self):
-        interval_data = self.engine.get_30min_distribution()
-        if not interval_data:
-            messagebox.showinfo('Info', 'Dados insuficientes para heatmap.')
-            return
-
-        win       = self._make_chart_window('Heatmap de Logs (30min)', '1200x650')
-        btn_frame = self._chart_btn_frame(win)
-
-        fig, ax = plt.subplots(figsize=(14, 6))
-        intervals = list(interval_data.keys())
-        counts    = list(interval_data.values())
-
-        max_count = max(counts) if counts else 1
-        colors    = plt.cm.Blues([0.2 + 0.8 * (c / max_count) for c in counts])
-
-        bars = ax.bar(range(len(intervals)), counts,
-                      color=colors, edgecolor='none')
-
-        for bar, count in zip(bars, counts):
-            if count > 0:
-                ax.text(bar.get_x() + bar.get_width() / 2, count, f'{count:,}',
-                        ha='center', va='bottom', fontsize=7, fontweight='bold')
-
-        ax.set_xlabel('Data/Hora', fontsize=11, fontweight='bold')
-        ax.set_ylabel('Quantidade de Logs', fontsize=11, fontweight='bold')
-        ax.set_title('Distribuicao de Logs (intervalos de 30min)', fontsize=13, fontweight='bold')
-        ax.set_xticks(range(len(intervals)))
-        ax.set_xticklabels(intervals, rotation=90, ha='right', fontsize=7)
-        ax.grid(True, axis='y', alpha=0.3, linestyle='--')
-
-        if counts:
-            avg = sum(counts) / len(counts)
-            ax.axhline(y=avg, color='#C53030', linestyle='--', linewidth=1.5,
-                       label=f'Media: {avg:.0f}', alpha=0.8)
-            ax.legend(fontsize=10)
-
-        plt.tight_layout()
-
-        self._embed_canvas(fig, win, btn_frame)
 
     def _show_details(self, event):
         item_id = self.table.tree.identify_row(event.y)
@@ -1269,8 +1275,28 @@ class FLogAApp:
         txt.config(state=tk.DISABLED)
 
     def _show_context_menu(self, event):
-        if self.table.tree.selection():
-            self.context_menu.post(event.x_root, event.y_root)
+        row_id = self.table.tree.identify_row(event.y)
+        col_id = self.table.tree.identify_column(event.x)
+        if not row_id or not self.table.tree.selection():
+            return
+
+        col_index = int(col_id.replace('#', '')) - 1
+        values = self.table.tree.item(row_id)['values']
+        if 0 <= col_index < len(values) and col_index < len(self.engine.columns):
+            field = self.engine.columns[col_index]
+            self._ctx_cell_value = str(values[col_index])
+            self.context_menu.entryconfig(0, label=f'Copiar Valor: {field}')
+        else:
+            self._ctx_cell_value = None
+            self.context_menu.entryconfig(0, label='Copiar Valor da Célula')
+
+        self.context_menu.post(event.x_root, event.y_root)
+
+    def _copy_cell_value(self):
+        if self._ctx_cell_value is None:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self._ctx_cell_value)
 
     def _copy_selection(self):
         selected = self.table.tree.selection()
@@ -1285,15 +1311,12 @@ class FLogAApp:
         self.root.clipboard_append('\n'.join(rows))
         messagebox.showinfo('Copiado', f'{len(selected)} linha(s) copiada(s).')
 
-    def _on_closing(self):
-        for win in self._chart_windows[:]:
-            try:
-                win.destroy()
-            except Exception:
-                pass
+    def _confirm_exit(self):
+        if messagebox.askyesno('Sair', 'Deseja sair?'):
+            self._on_closing()
 
-        if MATPLOTLIB_AVAILABLE:
-            plt.close('all')
+    def _on_closing(self):
+        self._cleanup_charts()
 
         if self._debounce_id:
             self.root.after_cancel(self._debounce_id)
