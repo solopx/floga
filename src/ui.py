@@ -11,6 +11,7 @@ from typing import Dict, List
 
 from log_engine import LogEngine, FilterCriteria
 from charts import ChartsMixin, MATPLOTLIB_AVAILABLE
+from insights import get_insights
 
 
 class UIStyle:
@@ -166,10 +167,11 @@ class SidebarView:
         nav = tk.Frame(self.frame, bg=UIStyle.BG_TOOLBAR, pady=10)
         nav.pack(fill=tk.X)
 
-        self.btn_load    = self._nav_btn(nav, 'Abrir Arquivo')
-        self.btn_groupby = self._nav_btn(nav, 'Agrupar Registros')
-        self.btn_charts  = self._nav_btn(nav, 'Gráficos')
-        self.btn_csv     = self._nav_btn(nav, 'Exportar CSV')
+        self.btn_load     = self._nav_btn(nav, 'Abrir Arquivo')
+        self.btn_groupby  = self._nav_btn(nav, 'Agrupar Registros')
+        self.btn_charts   = self._nav_btn(nav, 'Gráficos')
+        self.btn_insights = self._nav_btn(nav, 'Insights')
+        self.btn_csv      = self._nav_btn(nav, 'Exportar CSV')
         self.btn_json    = self._nav_btn(nav, 'Exportar JSON')
 
         self.btn_help = self._nav_btn(nav, 'Ajuda')
@@ -640,6 +642,166 @@ class GroupByView:
             self.tree.insert('', tk.END, values=(val, f'{count:,}'), tags=(tag,))
 
 
+class InsightsView:
+    def __init__(self, parent):
+        self.frame = UIStyle.create_frame(parent)
+
+        bar = tk.Frame(self.frame, bg=UIStyle.BG_TOOLBAR, padx=10, pady=6)
+        bar.pack(fill=tk.X)
+        tk.Label(
+            bar, text='Insights de Segurança',
+            bg=UIStyle.BG_TOOLBAR, fg=UIStyle.FG_ON_DARK,
+            font=UIStyle.FONT_BOLD,
+        ).pack(side=tk.LEFT)
+
+        btn_kwargs = dict(
+            bg=UIStyle.BG_TBTN_ACTIVE, fg=UIStyle.FG_ON_DARK,
+            font=UIStyle.FONT_NORMAL, relief=tk.FLAT, cursor='hand2',
+            activebackground=UIStyle.BG_TOOLBAR, activeforeground=UIStyle.FG_ON_DARK,
+            padx=10, pady=4, bd=0,
+        )
+        self.btn_close   = tk.Button(bar, text='← Voltar',   **btn_kwargs)
+        self.btn_refresh = tk.Button(bar, text='Atualizar',  **btn_kwargs)
+        self.btn_close.pack(side=tk.RIGHT, padx=(4, 0))
+        self.btn_refresh.pack(side=tk.RIGHT, padx=(4, 0))
+
+        container = tk.Frame(self.frame, bg=UIStyle.BG_MAIN, padx=16, pady=12)
+        container.pack(fill=tk.BOTH, expand=True)
+        container.rowconfigure(0, weight=1)
+        container.columnconfigure(0, weight=1)
+
+        self._text = tk.Text(
+            container,
+            font=UIStyle.FONT_NORMAL,
+            bg=UIStyle.BG_CARD,
+            fg=UIStyle.FG_MAIN,
+            relief=tk.FLAT,
+            wrap=tk.WORD,
+            padx=14, pady=12,
+            state=tk.DISABLED,
+            cursor='arrow',
+        )
+        vsb = ttk.Scrollbar(container, orient='vertical', command=self._text.yview)
+        self._text.configure(yscrollcommand=vsb.set)
+        self._text.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+
+        self._text.tag_configure('title',
+            font=(UIStyle.FONT_BOLD[0], UIStyle.FONT_BOLD[1], 'bold'),
+            foreground=UIStyle.ACCENT,
+            spacing1=10, spacing3=4,
+        )
+        self._text.tag_configure('body',
+            foreground=UIStyle.FG_MAIN,
+            lmargin1=12, lmargin2=12,
+        )
+        self._text.tag_configure('warn',
+            foreground=UIStyle.DANGER,
+            lmargin1=12, lmargin2=12,
+        )
+        self._text.tag_configure('muted',
+            foreground=UIStyle.FG_MUTED,
+            lmargin1=12, lmargin2=12,
+        )
+        self._text.tag_configure('sep',
+            foreground=UIStyle.BORDER_COLOR,
+            spacing1=6, spacing3=6,
+        )
+
+    def _w(self, text, tag='body'):
+        self._text.insert(tk.END, text, tag)
+
+    def populate(self, insights: dict):
+        self._text.config(state=tk.NORMAL)
+        self._text.delete('1.0', tk.END)
+
+        s = insights.get('summary', {})
+        total = s.get('total', 0)
+
+        if total == 0:
+            self._w('Nenhum log disponível para análise.\n', 'muted')
+            self._text.config(state=tk.DISABLED)
+            return
+
+        self._w('RESUMO GERAL\n', 'title')
+        period = s.get('period')
+        if period:
+            self._w(f'  Período: {period[0]}  →  {period[1]}\n', 'body')
+        self._w(f'  Total de registros analisados: {total:,}\n', 'body')
+        block_pct = s.get('block_pct', 0)
+        block_count = s.get('block_count', 0)
+        tag = 'warn' if block_pct > 30 else 'body'
+        self._w(f'  Ações de bloqueio: {block_count:,} ({block_pct:.1f}% do total)\n', tag)
+
+        self._w('─' * 60 + '\n', 'sep')
+        self._w('TIPOS DE TRÁFEGO\n', 'title')
+        traffic = insights.get('traffic_types', [])
+        if traffic:
+            for label, count, desc in traffic:
+                suffix = f'  ({desc})' if desc else ''
+                self._w(f'  {label:<18} {count:>8,} entradas{suffix}\n', 'body')
+        else:
+            self._w('  Campos service/dstport/proto não encontrados nos logs.\n', 'muted')
+
+        self._w('─' * 60 + '\n', 'sep')
+        self._w('CONCENTRAÇÃO DE BLOQUEIOS\n', 'title')
+        blockers = insights.get('top_blockers', [])
+        if blockers:
+            for b in blockers:
+                tag = 'warn' if b['pct'] > 20 else 'body'
+                self._w(f'  {b["ip"]}  —  {b["count"]:,} bloqueios  ({b["pct"]:.1f}%)\n', tag)
+        else:
+            self._w('  Nenhuma ação de bloqueio encontrada.\n', 'muted')
+
+        self._w('─' * 60 + '\n', 'sep')
+        self._w('PICO DE VOLUME\n', 'title')
+        peak = insights.get('peak_hour', {})
+        if peak:
+            diff = peak.get('diff_pct', 0)
+            tag = 'warn' if diff > 100 else 'body'
+            self._w(f'  Hora de pico: {peak["hour"]}\n', 'body')
+            self._w(f'  Volume: {peak["count"]:,} logs  '
+                    f'(+{diff:.0f}% acima da média de {peak["avg"]:.0f})\n', tag)
+        else:
+            self._w('  Dados insuficientes para análise de pico.\n', 'muted')
+
+        self._w('─' * 60 + '\n', 'sep')
+        self._w('SERVIÇOS INCOMUNS EM BLOQUEIOS\n', 'title')
+        unusual = insights.get('unusual_services', [])
+        if unusual:
+            self._w('  Serviços fora do top-10 detectados em ações de bloqueio:\n', 'body')
+            for svc in unusual:
+                self._w(f'  • {svc}\n', 'warn')
+        else:
+            self._w('  Nenhum serviço incomum detectado.\n', 'muted')
+
+        self._w('─' * 60 + '\n', 'sep')
+        self._w('SUSPEITOS DE PORT SCAN\n', 'title')
+        suspects = insights.get('port_scan', [])
+        if suspects:
+            self._w('  IPs com ≥10 portas de destino distintas:\n', 'body')
+            for ip, ports in suspects:
+                self._w(f'  • {ip}  —  {ports} portas distintas\n', 'warn')
+        else:
+            self._w('  Nenhum suspeito de port scan detectado.\n', 'muted')
+
+        self._w('─' * 60 + '\n', 'sep')
+        self._w('NÍVEL DE CRITICIDADE\n', 'title')
+        crit = insights.get('criticality', {})
+        pct = crit.get('pct_critical', 0)
+        trend = crit.get('trend', '—')
+        tag = 'warn' if pct > 10 else 'body'
+        self._w(f'  Eventos críticos/alerta/erro: {pct:.1f}% do total\n', tag)
+        trend_tag = 'warn' if trend == 'crescente' else 'body'
+        self._w(f'  Tendência: {trend}\n', trend_tag)
+        pf = crit.get('pct_first', 0)
+        ps = crit.get('pct_second', 0)
+        self._w(f'  (1ª metade do período: {pf:.1f}%  →  2ª metade: {ps:.1f}%)\n', 'muted')
+
+        self._text.config(state=tk.DISABLED)
+        self._text.yview_moveto(0)
+
+
 class FLogAApp(ChartsMixin):
     PAGE_SIZE   = 500
     DEBOUNCE_MS = 300
@@ -663,6 +825,7 @@ class FLogAApp(ChartsMixin):
         self._filter_running = False
         self._pending_criteria = None
         self._groupby_mode = False
+        self._insights_mode = False
 
         self._build_ui()
         self._connect_events()
@@ -687,7 +850,8 @@ class FLogAApp(ChartsMixin):
         self.table = TableView(main)
         self.table.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.groupby_view = GroupByView(main)
+        self.groupby_view  = GroupByView(main)
+        self.insights_view = InsightsView(main)
 
         self.navigation = NavigationView(content)
         self.navigation.frame.pack(fill=tk.X, padx=10, pady=(4, 4))
@@ -726,6 +890,9 @@ class FLogAApp(ChartsMixin):
         self.groupby_view.field_combo.bind('<<ComboboxSelected>>', self._on_groupby_field_change)
         self.groupby_view.tree.bind('<Double-1>', self._on_groupby_drilldown)
 
+        self.sidebar.btn_insights.config(command=self._toggle_insights)
+        self.insights_view.btn_close.config(command=self._close_insights)
+        self.insights_view.btn_refresh.config(command=self._refresh_insights)
 
         self.sidebar.btn_charts.config(command=self._show_charts_menu)
         self.sidebar.charts_menu.add_command(
@@ -917,6 +1084,8 @@ class FLogAApp(ChartsMixin):
             self._update_stats()
             if self._groupby_mode:
                 self._refresh_groupby()
+            if self._insights_mode:
+                self._refresh_insights()
             self._set_controls_state(tk.NORMAL)
             if self._pending_criteria is not None:
                 self._run_filter(self._pending_criteria)
@@ -1013,6 +1182,8 @@ class FLogAApp(ChartsMixin):
         if self._groupby_mode:
             self._close_groupby()
             return
+        if self._insights_mode:
+            self._close_insights()
         if not self.engine.filtered_logs:
             return
         self._groupby_mode = True
@@ -1049,6 +1220,31 @@ class FLogAApp(ChartsMixin):
         value = self.groupby_view.tree.item(sel, 'values')[0]
         self.filters.search_var.set(f'{field}=={value}')
         self._close_groupby()
+
+    def _toggle_insights(self):
+        if self._insights_mode:
+            self._close_insights()
+            return
+        if self._groupby_mode:
+            self._close_groupby()
+        if not self.engine.filtered_logs:
+            messagebox.showwarning('Insights', 'Carregue um arquivo de log primeiro.')
+            return
+        self._insights_mode = True
+        self.sidebar.btn_insights.config(bg=UIStyle.ACCENT, fg=UIStyle.FG_BUTTON)
+        self.table.frame.pack_forget()
+        self.insights_view.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._refresh_insights()
+
+    def _close_insights(self):
+        self._insights_mode = False
+        self.sidebar.btn_insights.config(bg=UIStyle.BG_TOOLBAR, fg=UIStyle.FG_ON_DARK)
+        self.insights_view.frame.pack_forget()
+        self.table.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    def _refresh_insights(self):
+        data = get_insights(self.engine.filtered_logs, self.engine.get_timeline_data())
+        self.insights_view.populate(data)
 
     def _show_help(self):
         win = tk.Toplevel(self.root)

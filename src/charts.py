@@ -24,7 +24,7 @@ def _init_mpl():
         plt = _plt
         FigureCanvasTkAgg = _FCA
     except Exception:
-        pass
+        logging.exception('Falha ao inicializar matplotlib')
 
 
 class ChartsMixin:
@@ -231,6 +231,7 @@ class ChartsMixin:
             try:
                 win.destroy()
             except Exception:
-                pass
+                logging.exception('Falha ao destruir janela de grafico')
+        self._chart_windows.clear()
         if plt is not None:
             plt.close('all')

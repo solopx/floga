@@ -33,6 +33,7 @@ class LogEngine:
     _HOUR_FMT   = '%Y-%m-%d %H:00'
     _TOKEN_RE   = re.compile(r'\s+(AND|OR)\s+', re.IGNORECASE)
     _FIELD_RE   = re.compile(r'^(\w+)(==|!=|:)(.+)$')
+    MAX_FILE_SIZE = 2 * 1024 ** 3
 
     def __init__(self):
         self.all_logs: List[Dict[str, str]] = []
@@ -51,6 +52,11 @@ class LogEngine:
         self.all_logs.clear()
         all_keys = set()
         size = os.path.getsize(filepath)
+        if size > self.MAX_FILE_SIZE:
+            raise ValueError(
+                f'Arquivo muito grande ({size / 1024**3:.2f} GB).\n\n'
+                f'O tamanho maximo suportado e {self.MAX_FILE_SIZE / 1024**3:.0f} GB.'
+            )
         total_lines = 0
         valid_lines = 0
         _CHUNK = 50_000
